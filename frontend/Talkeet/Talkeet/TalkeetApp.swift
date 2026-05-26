@@ -1,41 +1,38 @@
 /*
  * TalkeetApp.swift
  *
- * Purpose: Application entry point. Owns the BackendManager and drives its
- *          lifecycle from the SwiftUI scene phase.
+ * Purpose: Application entry point. Owns BackendManager and ProjectViewModel
+ *          and drives their lifecycles from the SwiftUI scene phase.
  *
  * Responsibilities:
- *   - Instantiate BackendManager as @State so it lives for the full app lifetime.
- *   - Inject it into the environment for all descendant views.
- *   - Start the backend when the scene becomes active; stop it on background/quit.
+ *   - Instantiate BackendManager and ProjectViewModel as @State for full app lifetime.
+ *   - Inject both into the environment for all descendant views.
+ *   - Start/stop the backend with the scene phase.
  *
  * Constraints:
- *   - Backend starts on .active (not on init) to avoid a race with the window appearing.
- *   - Backend stops on .background only — .inactive fires when the app loses focus
- *     (e.g. user switches to another app) and must not kill the backend.
- *   - On macOS, Cmd+Q terminates the process before scenePhase reaches .background,
- *     so NSApplication.willTerminateNotification is also observed as a safety net.
+ *   - Backend starts on .active (not on init) to avoid a race with window appearing.
+ *   - Backend stops on .background only — .inactive fires on focus loss, not quit.
+ *   - On macOS, Cmd+Q exits before scenePhase reaches .background, so
+ *     NSApplication.willTerminateNotification is also observed as a safety net.
  */
 
 import AppKit
 import OSLog
 import SwiftUI
 
-// One logger for the app entry point — lifecycle transitions only.
 private let log = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "App")
 
 @main
 struct TalkeetApp: App {
     @State private var backend = BackendManager()
+    @State private var project = ProjectViewModel()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup("Talkeet") {
             ContentView()
                 .environment(backend)
-                // Safety net: scenePhase never reaches .background on macOS Cmd+Q
-                // because the process exits first. willTerminateNotification fires
-                // synchronously during the quit sequence, guaranteeing cleanup.
+                .environment(project)
                 .onReceive(NotificationCenter.default.publisher(
                     for: NSApplication.willTerminateNotification)
                 ) { _ in
