@@ -19,6 +19,7 @@ import Foundation
 // MARK: - Segment Tests
 
 @Suite("Segment")
+@MainActor
 struct SegmentTests {
 
     @Test func decodesFromJSON() throws {
@@ -71,6 +72,7 @@ struct MockHTTPClient: HTTPClient {
 }
 
 @Suite("AnalysisService")
+@MainActor
 struct AnalysisServiceTests {
 
     @Test func returnsSegmentsOnSuccess() async throws {

@@ -18,6 +18,7 @@
 
 import OSLog
 import SwiftUI
+import UniformTypeIdentifiers
 
 private let log = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "UI")
 
