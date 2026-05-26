@@ -49,3 +49,85 @@ struct SegmentTests {
         #expect(abs(seg.duration - 2.5) < 0.001)
     }
 }
+
+// MARK: - AnalysisService Tests
+
+/// A mock HTTP client that returns a fixed response for any request.
+struct MockHTTPClient: HTTPClient {
+    /// The data to return on every call.
+    let responseData: Data
+    /// The HTTP status code to simulate.
+    let statusCode: Int
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (responseData, response)
+    }
+}
+
+@Suite("AnalysisService")
+struct AnalysisServiceTests {
+
+    @Test func returnsSegmentsOnSuccess() async throws {
+        let json = """
+        [
+          {"start": 0.0, "end": 1.0, "type": "silence"},
+          {"start": 1.0, "end": 5.0, "type": "speech"}
+        ]
+        """.data(using: .utf8)!
+        let client = MockHTTPClient(responseData: json, statusCode: 200)
+        let service = AnalysisService(client: client)
+
+        let segments = try await service.analyzeSilence(filePath: "/fake/video.mp4")
+
+        #expect(segments.count == 2)
+        #expect(segments[0].type == .silence)
+        #expect(segments[1].type == .speech)
+    }
+
+    @Test func throwsOnNon200Response() async throws {
+        let client = MockHTTPClient(responseData: Data(), statusCode: 404)
+        let service = AnalysisService(client: client)
+
+        do {
+            _ = try await service.analyzeSilence(filePath: "/fake/video.mp4")
+            Issue.record("Expected throw but got result")
+        } catch AnalysisError.httpError(let code) {
+            #expect(code == 404)
+        }
+    }
+
+    @Test func sendsCorrectJSONBody() async throws {
+        // Capture the outgoing request body to assert the file_path key.
+        actor RequestCapture: HTTPClient {
+            var capturedBody: Data?
+            let responseData: Data
+
+            init(responseData: Data) {
+                self.responseData = responseData
+            }
+
+            func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+                capturedBody = request.httpBody
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 200,
+                    httpVersion: nil, headerFields: nil)!
+                return (responseData, response)
+            }
+        }
+
+        let json = "[]".data(using: .utf8)!
+        let capture = RequestCapture(responseData: json)
+        let service = AnalysisService(client: capture)
+        _ = try await service.analyzeSilence(filePath: "/my/video.mp4")
+
+        let body = await capture.capturedBody
+        let decoded = try JSONDecoder().decode([String: String].self, from: body!)
+        #expect(decoded["file_path"] == "/my/video.mp4")
+    }
+}
