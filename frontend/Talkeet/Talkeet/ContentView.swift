@@ -31,11 +31,8 @@ struct ContentView: View {
         if project.videoURL != nil {
             // File is loaded — show the full editor.
             EditorView(viewModel: project) {
-                // "Close" resets the project so the drop zone is shown again.
-                project.videoURL = nil
-                project.player = nil
-                project.segments = []
-                project.errorMessage = nil
+                // Cancels any in-flight analysis and zeros all session state.
+                project.reset()
             }
         } else {
             dropZoneScreen

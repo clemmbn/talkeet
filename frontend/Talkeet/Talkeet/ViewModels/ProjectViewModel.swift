@@ -8,6 +8,8 @@
  *   - Trigger POST /analyze/silence on file load and expose the result.
  *   - Expose isAnalyzing and errorMessage for UI feedback.
  *   - Provide seekToSegment(_:) so the segment list can drive playback.
+ *   - Provide reset() so callers can cleanly tear down a session without
+ *     leaving in-flight tasks running.
  *
  * Constraints:
  *   - @MainActor ensures AVPlayer and UI state mutations are always on the main thread.
@@ -74,6 +76,23 @@ final class ProjectViewModel {
         analysisTask = Task { [weak self] in
             await self?.runAnalysis(for: url)
         }
+    }
+
+    // MARK: - Session teardown
+
+    /// Cancels any in-flight analysis and resets all session state.
+    /// Call this when the user closes a file to return to the drop zone.
+    func reset() {
+        // Cancel before zeroing isAnalyzing so the deferred flag-clear in runAnalysis
+        // doesn't race with the explicit reset below.
+        analysisTask?.cancel()
+        analysisTask = nil
+        videoURL = nil
+        player = nil
+        segments = []
+        errorMessage = nil
+        isAnalyzing = false
+        log.info("Session reset")
     }
 
     // MARK: - Playback
