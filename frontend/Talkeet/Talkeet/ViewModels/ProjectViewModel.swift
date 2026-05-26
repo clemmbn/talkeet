@@ -111,8 +111,11 @@ final class ProjectViewModel {
     /// Calls the analysis service and updates state on the main actor.
     private func runAnalysis(for url: URL) async {
         defer {
-            // Always clear the loading flag, even on cancellation or error.
-            isAnalyzing = false
+            // Only clear the flag if this task was not superseded by reset() or a new
+            // loadFile() — those callers have already set isAnalyzing to its correct value.
+            if !Task.isCancelled {
+                isAnalyzing = false
+            }
         }
 
         do {

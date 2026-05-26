@@ -57,7 +57,7 @@ final class AnalysisService: Sendable {
     /// - Returns: Array of segments covering the full video duration.
     /// - Throws: `AnalysisError.httpError` on non-200; decoding errors on malformed JSON.
     func analyzeSilence(filePath: String) async throws -> [Segment] {
-        let url = baseURL.appendingPathComponent("/analyze/silence")
+        let url = baseURL.appending(path: "analyze/silence")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
