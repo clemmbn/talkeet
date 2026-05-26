@@ -11,10 +11,10 @@ wheels/
 
 # macOS & Xcode files
 .DS_Store
- 
+
 # TextMate noise
 *.tm_build_errors
- 
+
 # Build files
 build/
 DerivedData/
@@ -40,3 +40,4 @@ content/
 
 # Resources
 resources/
+talkeet-docs/
