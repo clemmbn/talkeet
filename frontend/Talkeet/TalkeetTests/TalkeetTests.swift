@@ -131,3 +131,73 @@ struct AnalysisServiceTests {
         #expect(decoded["file_path"] == "/my/video.mp4")
     }
 }
+
+// MARK: - ProjectViewModel Tests
+
+@Suite("ProjectViewModel")
+@MainActor
+struct ProjectViewModelTests {
+
+    @Test func loadFilePopulatesSegmentsAfterAnalysis() async throws {
+        let json = """
+        [{"start": 0.0, "end": 2.0, "type": "silence"},
+         {"start": 2.0, "end": 5.0, "type": "speech"}]
+        """.data(using: .utf8)!
+        let client = MockHTTPClient(responseData: json, statusCode: 200)
+        let vm = ProjectViewModel(analysisService: AnalysisService(client: client))
+
+        // loadFile triggers an async analysis; poll until segments arrive.
+        let url = URL(fileURLWithPath: "/fake/video.mp4")
+        vm.loadFile(url)
+
+        // Give the async Task time to complete.
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(vm.segments.count == 2)
+        #expect(vm.isAnalyzing == false)
+        #expect(vm.errorMessage == nil)
+    }
+
+    @Test func loadFileSetsIsAnalyzingDuringFlight() async throws {
+        // Use a client that never resolves — captures the in-flight state.
+        struct HangingClient: HTTPClient, Sendable {
+            func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+                // Sleep for a very long time to simulate a slow backend.
+                try await Task.sleep(for: .seconds(60))
+                fatalError("Should not reach here")
+            }
+        }
+        let vm = ProjectViewModel(analysisService: AnalysisService(client: HangingClient()))
+        let url = URL(fileURLWithPath: "/fake/video.mp4")
+        vm.loadFile(url)
+
+        // isAnalyzing should be true immediately after loadFile
+        #expect(vm.isAnalyzing == true)
+    }
+
+    @Test func loadFilePopulatesErrorOnFailure() async throws {
+        let client = MockHTTPClient(responseData: Data(), statusCode: 500)
+        let vm = ProjectViewModel(analysisService: AnalysisService(client: client))
+        let url = URL(fileURLWithPath: "/fake/video.mp4")
+        vm.loadFile(url)
+
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(vm.errorMessage != nil)
+        #expect(vm.isAnalyzing == false)
+        #expect(vm.segments.isEmpty)
+    }
+
+    @Test func loadFileClearsPreviousSegments() async throws {
+        let json = "[]".data(using: .utf8)!
+        let client = MockHTTPClient(responseData: json, statusCode: 200)
+        let vm = ProjectViewModel(analysisService: AnalysisService(client: client))
+
+        // Manually pre-populate segments to simulate a previous analysis.
+        vm.segments = [Segment(start: 0, end: 1, type: .speech)]
+        vm.loadFile(URL(fileURLWithPath: "/new/video.mp4"))
+
+        // Before async resolves, segments should already be cleared.
+        #expect(vm.segments.isEmpty)
+    }
+}
