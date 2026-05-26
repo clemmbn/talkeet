@@ -4,11 +4,11 @@
 
 ## Deliverables
 
-- [ ] SwiftUI app project (Xcode)
-- [ ] On launch: starts the bundled Python backend process, polls `GET /health` until ready
-- [ ] On quit: terminates the backend process cleanly
-- [ ] Basic window with a "Drop MP4 here" area and an app status indicator (backend ready / loading / error)
-- [ ] Backend binary path resolved from the app bundle
+- [x] SwiftUI app project (Xcode)
+- [x] On launch: starts the bundled Python backend process, polls `GET /health` until ready
+- [x] On quit: terminates the backend process cleanly
+- [x] Basic window with a "Drop MP4 here" area and an app status indicator (backend ready / loading / error)
+- [x] Backend binary path resolved from the app bundle
 
 ## Test
 
