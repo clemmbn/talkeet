@@ -4,14 +4,14 @@
  * Purpose: Full editor layout shown after a video file has been loaded.
  *
  * Responsibilities:
- *   - Arrange VideoPlayerView (main area) and SegmentListView (sidebar) side by side.
+ *   - Arrange VideoPlayerView + WaveformView (main area) and SegmentListView (sidebar) side by side.
  *   - Wire segment tap → ProjectViewModel.seekToSegment(_:).
  *   - Provide a "Close" button to return to the drop zone.
  *
  * Constraints:
  *   - ProjectViewModel is passed in (not read from environment) so EditorView
  *     remains reusable and previewable in isolation.
- *   - The split is fixed-ratio (no draggable divider) until M7 adds the waveform.
+ *   - The split is fixed-ratio (no draggable divider) until M7 adds interactive scrubbing.
  */
 
 import SwiftUI
@@ -24,11 +24,16 @@ struct EditorView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Main area: video player
+            // Main area: video player + waveform timeline
             VStack(spacing: 0) {
                 toolbar
                 Divider()
                 VideoPlayerView(player: viewModel.player)
+                Divider()
+                WaveformView(
+                    samples: viewModel.waveformSamples,
+                    segments: viewModel.segments
+                )
             }
 
             Divider()

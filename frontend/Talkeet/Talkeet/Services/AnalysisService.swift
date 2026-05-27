@@ -1,11 +1,10 @@
 /*
  * AnalysisService.swift
  *
- * Purpose: Wraps the POST /analyze/silence backend endpoint.
+ * Purpose: Wraps the POST /analyze/silence and POST /analyze/waveform backend endpoints.
  *
  * Responsibilities:
- *   - Encode the request body (file_path + default silence parameters).
- *   - Decode the response JSON into [Segment].
+ *   - Encode request bodies and decode responses for silence analysis and waveform extraction.
  *   - Surface HTTP errors as AnalysisError.httpError(statusCode).
  *
  * Constraints:
@@ -31,6 +30,17 @@ private struct SilenceRequest: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case filePath = "file_path"
+    }
+}
+
+/// Request body for POST /analyze/waveform.
+private struct WaveformRequest: Encodable {
+    let filePath: String
+    let numSamples: Int
+
+    enum CodingKeys: String, CodingKey {
+        case filePath = "file_path"
+        case numSamples = "num_samples"
     }
 }
 
@@ -71,5 +81,28 @@ final class AnalysisService: Sendable {
         }
 
         return try JSONDecoder().decode([Segment].self, from: data)
+    }
+
+    /// Posts a video file path to /analyze/waveform and returns normalized RMS amplitude buckets.
+    /// - Parameters:
+    ///   - filePath: Absolute path to the video file on disk.
+    ///   - numSamples: Number of amplitude buckets to return (higher = more detail).
+    /// - Returns: Array of doubles in [0.0, 1.0]; index maps to time via `(i / count) * duration`.
+    /// - Throws: `AnalysisError.httpError` on non-200; decoding errors on malformed JSON.
+    func fetchWaveform(filePath: String, numSamples: Int = 8000) async throws -> [Double] {
+        let url = baseURL.appending(path: "analyze/waveform")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(WaveformRequest(filePath: filePath, numSamples: numSamples))
+
+        let (data, response) = try await client.data(for: request)
+
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw AnalysisError.httpError(code)
+        }
+
+        return try JSONDecoder().decode([Double].self, from: data)
     }
 }
