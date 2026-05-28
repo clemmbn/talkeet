@@ -23,7 +23,8 @@
  * Constraints:
  *   - `duration` is derived from segments.last?.end so no extra state is needed.
  *   - Canvas redraws automatically when samples, segments, or currentTime change.
- *   - Bar width is clamped to ≥ 1 pt so bars remain visible at any zoom level.
+ *   - Bar width is NOT clamped; sub-pixel bars anti-alias into a filled waveform at 1×,
+ *     ensuring all samples span the full viewport width regardless of sample count.
  *   - MagnifyGesture uses simultaneousGesture so the ScrollView's scroll handling
  *     (two-finger swipe) is not blocked.
  *   - Zoom state (@State) is internal to the view; the ViewModel does not need it.
@@ -209,15 +210,18 @@ struct WaveformView: View {
         // but guard defensively to make the empty-array no-op explicit.
         guard !samples.isEmpty else { return }
         let count = samples.count
-        // barW ≥ 1 pt so bars remain visible even with many samples at low zoom.
-        let barW  = max(size.width / CGFloat(count), 1.0)
+        // No minimum clamp: sub-pixel bars are anti-aliased by the Canvas and blend into a
+        // filled-waveform appearance at low zoom (standard audio-editor behaviour).
+        // Clamping to 1 pt would limit visible bars to ~viewport_width out of ~8000 total,
+        // making the waveform appear zoomed in at 1×.
+        let barW  = size.width / CGFloat(count)
         let midY  = size.height / 2
 
         for (i, sample) in samples.enumerated() {
             let x          = CGFloat(i) * barW
             let halfHeight = CGFloat(sample) * midY
-            // 0.5 pt gap only when bars are wide enough to show it.
-            let drawW      = barW > 1 ? barW - 0.5 : barW
+            // Only add a 0.5 pt gap when bars are wide enough for it to be visible.
+            let drawW      = barW > 1.5 ? barW - 0.5 : barW
             let rect       = CGRect(x: x, y: midY - halfHeight, width: drawW, height: halfHeight * 2)
             context.fill(Path(rect), with: .color(.primary.opacity(0.65)))
         }
