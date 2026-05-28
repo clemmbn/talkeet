@@ -27,6 +27,8 @@
  *   - MagnifyGesture uses simultaneousGesture so the ScrollView's scroll handling
  *     (two-finger swipe) is not blocked.
  *   - Zoom state (@State) is internal to the view; the ViewModel does not need it.
+ *   - Auto-scroll fires on every currentTime tick (~30 fps) only when zoomed in;
+ *     suppressed during user scrub (isDragging = true) to avoid fighting the user.
  */
 
 import SwiftUI
@@ -48,6 +50,8 @@ struct WaveformView: View {
     /// Zoom level committed at gesture end; read at the start of each subsequent gesture
     /// so delta magnification from `MagnifyGesture.Value.magnification` accumulates correctly.
     @State private var gestureBaseZoom: CGFloat = 1.0
+    /// True while the user is dragging to seek; suppresses auto-scroll during scrub.
+    @State private var isDragging: Bool = false
 
     var body: some View {
         Group {
@@ -66,10 +70,10 @@ struct WaveformView: View {
     // MARK: - Waveform canvas
 
     /// Builds the scrollable, zoomable waveform canvas.
-    /// Layout: GeometryReader → ZStack → ScrollView(.horizontal) → Canvas.
+    /// Layout: GeometryReader → ZStack → ScrollViewReader → ScrollView(.horizontal) → ZStack → Canvas.
     /// The Canvas width = geo.size.width × zoomScale; at 1× it fills the viewport exactly.
-    /// The zoom-reset badge sits in the ZStack above the ScrollView so it stays fixed in
-    /// the viewport regardless of scroll position.
+    /// During playback at zoom > 1×, auto-scrolls to keep the playhead centered via ScrollViewReader.
+    /// The zoom-reset badge sits in the outer ZStack so it stays fixed in the viewport.
     private var waveformCanvas: some View {
         // GeometryReader captures the viewport width so contentWidth can be derived.
         GeometryReader { geo in
@@ -78,23 +82,50 @@ struct WaveformView: View {
             let contentWidth = geo.size.width * zoomScale
 
             ZStack(alignment: .topTrailing) {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    Canvas { context, size in
-                        drawSegmentBackgrounds(context: context, size: size, duration: duration)
-                        drawWaveformBars(context: context, size: size)
-                        drawPlayhead(context: context, size: size, duration: duration)
-                    }
-                    .frame(width: contentWidth, height: geo.size.height)
-                    // DragGesture location is in canvas (content) space, so seek is accurate
-                    // at any zoom level without knowing the current scroll offset.
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                guard duration > 0, contentWidth > 0 else { return }
-                                let fraction = Double(value.location.x / contentWidth)
-                                onSeek(max(0, min(fraction * duration, duration)))
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        ZStack(alignment: .topLeading) {
+                            Canvas { context, size in
+                                drawSegmentBackgrounds(context: context, size: size, duration: duration)
+                                drawWaveformBars(context: context, size: size)
+                                drawPlayhead(context: context, size: size, duration: duration)
                             }
-                    )
+
+                            // Invisible 1 pt anchor positioned at the playhead X.
+                            // ScrollViewReader uses this to scroll the timeline during playback.
+                            // Padding changes with currentTime; offset is layout-affecting so
+                            // scrollTo finds the correct position each tick.
+                            Color.clear
+                                .frame(width: 1, height: 1)
+                                .padding(.leading, duration > 0
+                                    ? CGFloat(min(currentTime, duration) / duration) * contentWidth
+                                    : 0)
+                                .id("waveform-playhead-anchor")
+                        }
+                        .frame(width: contentWidth, height: geo.size.height)
+                        // DragGesture location is in canvas (content) space, so seek is accurate
+                        // at any zoom level without knowing the current scroll offset.
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    isDragging = true
+                                    guard duration > 0, contentWidth > 0 else { return }
+                                    let fraction = Double(value.location.x / contentWidth)
+                                    onSeek(max(0, min(fraction * duration, duration)))
+                                }
+                                .onEnded { _ in
+                                    isDragging = false
+                                }
+                        )
+                    }
+                    // Auto-scroll: when zoomed in and the video is playing (not scrubbing),
+                    // keep the playhead centered in the viewport.
+                    // Note: if the user is two-finger-scrolling simultaneously, the scroll
+                    // may conflict; this is an acceptable tradeoff for the first implementation.
+                    .onChange(of: currentTime) { _, _ in
+                        guard zoomScale > 1.01, !isDragging else { return }
+                        proxy.scrollTo("waveform-playhead-anchor", anchor: .center)
+                    }
                 }
 
                 // Zoom indicator badge — visible only when zoomed in; tap to reset.
