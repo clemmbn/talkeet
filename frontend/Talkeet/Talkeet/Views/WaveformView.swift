@@ -37,8 +37,10 @@ struct WaveformView: View {
     let onSeek: (Double) -> Void
 
     /// Current zoom multiplier; 1.0 = fit-to-width. Clamped to [1.0, 50.0].
+    /// Wired into the ScrollView/MagnifyGesture layout in the next task.
     @State private var zoomScale: CGFloat = 1.0
     /// Zoom captured at gesture start so delta magnification accumulates correctly.
+    /// Used by MagnifyGesture in the next task.
     @State private var gestureBaseZoom: CGFloat = 1.0
 
     var body: some View {
@@ -100,10 +102,14 @@ struct WaveformView: View {
     }
 
     /// Draws symmetric vertical amplitude bars from the samples array.
+    /// Reads `self.samples`; no-ops when samples is empty.
     /// - Parameters:
     ///   - context: The active Canvas graphics context.
     ///   - size: Full canvas size in points.
     private func drawWaveformBars(context: GraphicsContext, size: CGSize) {
+        // Guard: body shows placeholder when samples are empty; this helper is never called then,
+        // but guard defensively to make the empty-array no-op explicit.
+        guard !samples.isEmpty else { return }
         let count = samples.count
         // barW ≥ 1 pt so bars remain visible even with many samples at low zoom.
         let barW  = max(size.width / CGFloat(count), 1.0)
