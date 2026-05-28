@@ -7,7 +7,9 @@
  *   - Own the AVPlayer for the currently loaded video.
  *   - Trigger POST /analyze/silence and POST /analyze/waveform on file load.
  *   - Expose isAnalyzing and errorMessage for UI feedback.
- *   - Provide seekToSegment(_:) so the segment list can drive playback.
+ *   - Provide seekToSegment(_:) and seekToTime(_:) so the segment list and
+ *     waveform timeline can drive playback.
+ *   - Track currentTime via a periodic AVPlayer observer for playhead sync.
  *   - Provide reset() so callers can cleanly tear down a session without
  *     leaving in-flight tasks running.
  *
@@ -16,6 +18,8 @@
  *   - analysisService is injected so tests can supply a mock without a real backend.
  *   - loadFile() cancels any in-flight tasks before starting new ones.
  *   - Silence analysis and waveform fetch run in parallel; either may fail independently.
+ *   - The time observer is removed from the old player before a new one is created,
+ *     preventing dangling observer references.
  */
 
 import AVKit
@@ -49,6 +53,9 @@ final class ProjectViewModel {
     /// Non-nil when the last analysis attempt failed.
     var errorMessage: String?
 
+    /// Current playback position in seconds; updated at ~30 fps via a periodic AVPlayer observer.
+    var currentTime: Double = 0
+
     // MARK: - Private
 
     private let analysisService: AnalysisService
@@ -56,6 +63,8 @@ final class ProjectViewModel {
     private var analysisTask: Task<Void, Never>?
     /// Held so we can cancel an in-flight waveform fetch when a new file is loaded.
     private var waveformTask: Task<Void, Never>?
+    /// Token returned by addPeriodicTimeObserver; must be removed before the player is replaced.
+    private var timeObserver: Any?
 
     /// - Parameter analysisService: Injected for testability (default uses URLSession.shared).
     init(analysisService: AnalysisService = AnalysisService()) {
@@ -72,8 +81,13 @@ final class ProjectViewModel {
         analysisTask?.cancel()
         waveformTask?.cancel()
 
+        // Remove the observer from the OLD player before replacing it; the observer
+        // token is tied to the specific AVPlayer instance it was registered on.
+        removeTimeObserver()
+
         videoURL = url
         player = AVPlayer(url: url)
+        setupTimeObserver()
         segments = []
         waveformSamples = []
         errorMessage = nil
@@ -102,12 +116,16 @@ final class ProjectViewModel {
         analysisTask = nil
         waveformTask?.cancel()
         waveformTask = nil
+        // Remove observer before niling the player — the token is invalid once the
+        // player is deallocated.
+        removeTimeObserver()
         videoURL = nil
         player = nil
         segments = []
         waveformSamples = []
         errorMessage = nil
         isAnalyzing = false
+        currentTime = 0
         log.info("Session reset")
     }
 
@@ -116,13 +134,43 @@ final class ProjectViewModel {
     /// Seeks the player to the start of the given segment.
     /// - Parameter segment: The segment whose start time to seek to.
     func seekToSegment(_ segment: Segment) {
+        seekToTime(segment.start)
+    }
+
+    /// Seeks the player to a specific time in seconds and immediately updates currentTime
+    /// so the playhead snaps to the tapped position without waiting for the next observer tick.
+    /// - Parameter time: Target time in seconds.
+    func seekToTime(_ time: Double) {
         // Use toleranceBefore/After .zero for frame-accurate seeking.
-        let time = CMTime(seconds: segment.start, preferredTimescale: 600)
-        player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-        log.debug("Seeking to segment start: \(segment.start, privacy: .public)s")
+        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
+        player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        // Mirror the seek position immediately so the playhead doesn't lag behind.
+        currentTime = time
+        log.debug("Seeking to: \(time, privacy: .public)s")
     }
 
     // MARK: - Private
+
+    /// Registers a 30 fps periodic observer on the current player to update currentTime.
+    /// Must be called after self.player is set to a new instance.
+    private func setupTimeObserver() {
+        guard let player else { return }
+        let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600)
+        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            // We specified queue: .main so we are on the main thread, but the compiler
+            // doesn't know that — use assumeIsolated to satisfy Swift 6 strict concurrency.
+            MainActor.assumeIsolated {
+                self?.currentTime = time.seconds
+            }
+        }
+    }
+
+    /// Removes the periodic time observer from the current player and clears the token.
+    private func removeTimeObserver() {
+        guard let observer = timeObserver else { return }
+        player?.removeTimeObserver(observer)
+        timeObserver = nil
+    }
 
     /// Calls the analysis service and updates state on the main actor.
     private func runAnalysis(for url: URL) async {

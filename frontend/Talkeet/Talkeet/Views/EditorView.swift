@@ -11,7 +11,7 @@
  * Constraints:
  *   - ProjectViewModel is passed in (not read from environment) so EditorView
  *     remains reusable and previewable in isolation.
- *   - The split is fixed-ratio (no draggable divider) until M7 adds interactive scrubbing.
+ *   - The split is fixed-ratio (no draggable divider) until a future milestone adds it.
  */
 
 import SwiftUI
@@ -32,7 +32,9 @@ struct EditorView: View {
                 Divider()
                 WaveformView(
                     samples: viewModel.waveformSamples,
-                    segments: viewModel.segments
+                    segments: viewModel.segments,
+                    currentTime: viewModel.currentTime,
+                    onSeek: { viewModel.seekToTime($0) }
                 )
             }
 
