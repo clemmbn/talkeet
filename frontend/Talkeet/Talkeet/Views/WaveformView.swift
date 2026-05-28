@@ -36,6 +36,11 @@ struct WaveformView: View {
     /// Called when the user taps or drags on the waveform to seek to a time in seconds.
     let onSeek: (Double) -> Void
 
+    /// Current zoom multiplier; 1.0 = fit-to-width. Clamped to [1.0, 50.0].
+    @State private var zoomScale: CGFloat = 1.0
+    /// Zoom captured at gesture start so delta magnification accumulates correctly.
+    @State private var gestureBaseZoom: CGFloat = 1.0
+
     var body: some View {
         Group {
             if samples.isEmpty {
@@ -59,39 +64,9 @@ struct WaveformView: View {
             let duration = segments.last?.end ?? 0
 
             Canvas { context, size in
-                // Pass 1: draw colored segment background regions.
-                if duration > 0 {
-                    for segment in segments where segment.type == .silence {
-                        let xStart = CGFloat(segment.start / duration) * size.width
-                        let xEnd   = CGFloat(segment.end   / duration) * size.width
-                        let rect   = CGRect(x: xStart, y: 0, width: xEnd - xStart, height: size.height)
-                        // Silence regions get a red tint to mark them for removal.
-                        context.fill(Path(rect), with: .color(.red.opacity(0.15)))
-                    }
-                }
-
-                // Pass 2: draw waveform bars, symmetric around the vertical center.
-                let count   = samples.count
-                let barW    = max(size.width / CGFloat(count), 1.0)
-                let midY    = size.height / 2
-
-                for (i, sample) in samples.enumerated() {
-                    let x          = CGFloat(i) * barW
-                    let halfHeight = CGFloat(sample) * midY
-                    // Leave a 0.5 pt gap between bars when there is room; skip gap when bars are 1 pt wide.
-                    let drawW  = barW > 1 ? barW - 0.5 : barW
-                    let rect   = CGRect(x: x, y: midY - halfHeight, width: drawW, height: halfHeight * 2)
-                    context.fill(Path(rect), with: .color(.primary.opacity(0.65)))
-                }
-
-                // Pass 3: draw playhead last so it renders on top of bars and regions.
-                if duration > 0 {
-                    let x = CGFloat(currentTime / duration) * size.width
-                    var path = Path()
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
-                    context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 1.5))
-                }
+                drawSegmentBackgrounds(context: context, size: size, duration: duration)
+                drawWaveformBars(context: context, size: size)
+                drawPlayhead(context: context, size: size, duration: duration)
             }
             .gesture(
                 // minimumDistance: 0 so a plain tap (zero drag) is also handled.
@@ -105,6 +80,57 @@ struct WaveformView: View {
                     }
             )
         }
+    }
+
+    // MARK: - Canvas drawing
+
+    /// Draws red-tinted background regions for silence segments.
+    /// - Parameters:
+    ///   - context: The active Canvas graphics context.
+    ///   - size: Full canvas size in points.
+    ///   - duration: Total audio duration in seconds; used to map time → x.
+    private func drawSegmentBackgrounds(context: GraphicsContext, size: CGSize, duration: Double) {
+        guard duration > 0 else { return }
+        for segment in segments where segment.type == .silence {
+            let xStart = CGFloat(segment.start / duration) * size.width
+            let xEnd   = CGFloat(segment.end   / duration) * size.width
+            let rect   = CGRect(x: xStart, y: 0, width: xEnd - xStart, height: size.height)
+            context.fill(Path(rect), with: .color(.red.opacity(0.15)))
+        }
+    }
+
+    /// Draws symmetric vertical amplitude bars from the samples array.
+    /// - Parameters:
+    ///   - context: The active Canvas graphics context.
+    ///   - size: Full canvas size in points.
+    private func drawWaveformBars(context: GraphicsContext, size: CGSize) {
+        let count = samples.count
+        // barW ≥ 1 pt so bars remain visible even with many samples at low zoom.
+        let barW  = max(size.width / CGFloat(count), 1.0)
+        let midY  = size.height / 2
+
+        for (i, sample) in samples.enumerated() {
+            let x          = CGFloat(i) * barW
+            let halfHeight = CGFloat(sample) * midY
+            // 0.5 pt gap only when bars are wide enough to show it.
+            let drawW      = barW > 1 ? barW - 0.5 : barW
+            let rect       = CGRect(x: x, y: midY - halfHeight, width: drawW, height: halfHeight * 2)
+            context.fill(Path(rect), with: .color(.primary.opacity(0.65)))
+        }
+    }
+
+    /// Draws the playhead line at the current playback position on top of bars.
+    /// - Parameters:
+    ///   - context: The active Canvas graphics context.
+    ///   - size: Full canvas size in points.
+    ///   - duration: Total audio duration in seconds.
+    private func drawPlayhead(context: GraphicsContext, size: CGSize, duration: Double) {
+        guard duration > 0 else { return }
+        let x = CGFloat(currentTime / duration) * size.width
+        var path = Path()
+        path.move(to:    CGPoint(x: x, y: 0))
+        path.addLine(to: CGPoint(x: x, y: size.height))
+        context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 1.5))
     }
 
     // MARK: - Placeholder
