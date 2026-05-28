@@ -65,6 +65,13 @@ struct WaveformView: View {
         .frame(maxWidth: .infinity)
         .frame(height: 80)
         .background(Color(nsColor: .controlBackgroundColor))
+        // Reset zoom when a new file is loaded (samples go from empty to populated).
+        .onChange(of: samples.isEmpty) { _, isEmpty in
+            if !isEmpty {
+                zoomScale = 1.0
+                gestureBaseZoom = 1.0
+            }
+        }
     }
 
     // MARK: - Waveform canvas
