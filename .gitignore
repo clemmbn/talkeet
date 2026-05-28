@@ -41,3 +41,4 @@ content/
 # Resources
 resources/
 talkeet-docs/
+.worktrees/
