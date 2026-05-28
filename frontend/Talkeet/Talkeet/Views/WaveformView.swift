@@ -1,8 +1,8 @@
 /*
  * WaveformView.swift
  *
- * Purpose: Renders a scrollable audio waveform with color-coded segment regions,
- *          a real-time playhead, and tap/drag-to-seek interaction.
+ * Purpose: Renders a scrollable, zoomable audio waveform with color-coded segment
+ *          regions, a real-time playhead, and tap/drag-to-seek interaction.
  *
  * Responsibilities:
  *   - Draw normalized RMS amplitude buckets as vertical bars in a SwiftUI Canvas.
@@ -10,16 +10,23 @@
  *       speech  → clear (neutral, no tint)
  *       silence → red tint (highlighted for removal)
  *   - Draw a playhead line at the currentTime position (updated at ~30 fps).
+ *   - Support horizontal scrolling (two-finger swipe on the trackpad) via ScrollView.
+ *   - Support pinch-to-zoom via MagnifyGesture; zoom range [1×, 50×].
+ *     At 1× the canvas exactly fills the viewport width; zooming expands the canvas
+ *     so more resolution becomes visible inside the scroll container.
+ *   - Show a compact zoom-level badge (top-right) when zoomed in; tap it to reset.
  *   - Translate tap/drag x-position to a time value and call onSeek so the
- *     AVPlayer follows user scrubbing.
+ *     AVPlayer follows user scrubbing. The drag location is in canvas (content)
+ *     space, so seek accuracy is maintained at any zoom level.
  *   - Show a placeholder when samples have not yet loaded.
  *
  * Constraints:
  *   - `duration` is derived from segments.last?.end so no extra state is needed.
  *   - Canvas redraws automatically when samples, segments, or currentTime change.
- *   - Bar width is clamped to at least 1 pt so individual bars remain visible at low zoom.
- *   - GeometryReader is used to expose the canvas width to the DragGesture handler
- *     without additional @State — the value is read from the proxy at gesture time.
+ *   - Bar width is clamped to ≥ 1 pt so bars remain visible at any zoom level.
+ *   - MagnifyGesture uses simultaneousGesture so the ScrollView's scroll handling
+ *     (two-finger swipe) is not blocked.
+ *   - Zoom state (@State) is internal to the view; the ViewModel does not need it.
  */
 
 import SwiftUI
@@ -37,10 +44,8 @@ struct WaveformView: View {
     let onSeek: (Double) -> Void
 
     /// Current zoom multiplier; 1.0 = fit-to-width. Clamped to [1.0, 50.0].
-    /// Wired into the ScrollView/MagnifyGesture layout in the next task.
     @State private var zoomScale: CGFloat = 1.0
-    /// Zoom captured at gesture start so delta magnification accumulates correctly.
-    /// Used by MagnifyGesture in the next task.
+    /// Zoom level captured at gesture start so delta magnification accumulates correctly.
     @State private var gestureBaseZoom: CGFloat = 1.0
 
     var body: some View {
@@ -60,28 +65,75 @@ struct WaveformView: View {
     // MARK: - Waveform canvas
 
     private var waveformCanvas: some View {
-        // GeometryReader lets the DragGesture handler convert x-position → time
-        // without needing an extra @State for the view width.
+        // GeometryReader captures the viewport width so contentWidth can be derived.
         GeometryReader { geo in
-            let duration = segments.last?.end ?? 0
+            let duration     = segments.last?.end ?? 0
+            // At zoomScale 1.0 the canvas exactly fills the viewport; >1.0 it overflows into scroll.
+            let contentWidth = geo.size.width * zoomScale
 
-            Canvas { context, size in
-                drawSegmentBackgrounds(context: context, size: size, duration: duration)
-                drawWaveformBars(context: context, size: size)
-                drawPlayhead(context: context, size: size, duration: duration)
+            ZStack(alignment: .topTrailing) {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    Canvas { context, size in
+                        drawSegmentBackgrounds(context: context, size: size, duration: duration)
+                        drawWaveformBars(context: context, size: size)
+                        drawPlayhead(context: context, size: size, duration: duration)
+                    }
+                    .frame(width: contentWidth, height: geo.size.height)
+                    // DragGesture location is in canvas (content) space, so seek is accurate
+                    // at any zoom level without knowing the current scroll offset.
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard duration > 0, contentWidth > 0 else { return }
+                                let fraction = Double(value.location.x / contentWidth)
+                                onSeek(max(0, min(fraction * duration, duration)))
+                            }
+                    )
+                }
+
+                // Zoom indicator badge — visible only when zoomed in; tap to reset.
+                if zoomScale > 1.01 {
+                    zoomResetButton
+                }
             }
-            .gesture(
-                // minimumDistance: 0 so a plain tap (zero drag) is also handled.
-                DragGesture(minimumDistance: 0)
+            // simultaneousGesture lets the ScrollView handle two-finger swipe while also
+            // recognising trackpad pinch via MagnifyGesture.
+            .simultaneousGesture(
+                MagnifyGesture()
                     .onChanged { value in
-                        guard duration > 0, geo.size.width > 0 else { return }
-                        let fraction = value.location.x / geo.size.width
-                        let time = Double(fraction) * duration
-                        // Clamp to [0, duration] so dragging past the edges is safe.
-                        onSeek(max(0, min(time, duration)))
+                        let newScale = gestureBaseZoom * value.magnification
+                        zoomScale = max(1.0, min(50.0, newScale))
+                    }
+                    .onEnded { value in
+                        let finalScale = gestureBaseZoom * value.magnification
+                        zoomScale = max(1.0, min(50.0, finalScale))
+                        // Persist the final scale so the next gesture accumulates from here.
+                        gestureBaseZoom = zoomScale
                     }
             )
         }
+    }
+
+    // MARK: - Zoom reset overlay
+
+    /// Small badge in the top-right corner showing the current zoom level.
+    /// Tapping it resets zoom to fit-to-width (1.0×) with a brief animation.
+    private var zoomResetButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                zoomScale = 1.0
+                gestureBaseZoom = 1.0
+            }
+        } label: {
+            Text(String(format: "%.0f×", zoomScale))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .padding(4)
     }
 
     // MARK: - Canvas drawing
