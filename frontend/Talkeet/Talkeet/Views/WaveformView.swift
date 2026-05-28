@@ -45,7 +45,8 @@ struct WaveformView: View {
 
     /// Current zoom multiplier; 1.0 = fit-to-width. Clamped to [1.0, 50.0].
     @State private var zoomScale: CGFloat = 1.0
-    /// Zoom level captured at gesture start so delta magnification accumulates correctly.
+    /// Zoom level committed at gesture end; read at the start of each subsequent gesture
+    /// so delta magnification from `MagnifyGesture.Value.magnification` accumulates correctly.
     @State private var gestureBaseZoom: CGFloat = 1.0
 
     var body: some View {
@@ -64,6 +65,11 @@ struct WaveformView: View {
 
     // MARK: - Waveform canvas
 
+    /// Builds the scrollable, zoomable waveform canvas.
+    /// Layout: GeometryReader → ZStack → ScrollView(.horizontal) → Canvas.
+    /// The Canvas width = geo.size.width × zoomScale; at 1× it fills the viewport exactly.
+    /// The zoom-reset badge sits in the ZStack above the ScrollView so it stays fixed in
+    /// the viewport regardless of scroll position.
     private var waveformCanvas: some View {
         // GeometryReader captures the viewport width so contentWidth can be derived.
         GeometryReader { geo in
@@ -92,6 +98,8 @@ struct WaveformView: View {
                 }
 
                 // Zoom indicator badge — visible only when zoomed in; tap to reset.
+                // 1.01 threshold provides hysteresis: avoids the badge flickering on/off due
+                // to floating-point imprecision when zoom is clamped back toward 1.0.
                 if zoomScale > 1.01 {
                     zoomResetButton
                 }
@@ -184,7 +192,8 @@ struct WaveformView: View {
     ///   - duration: Total audio duration in seconds.
     private func drawPlayhead(context: GraphicsContext, size: CGSize, duration: Double) {
         guard duration > 0 else { return }
-        let x = CGFloat(currentTime / duration) * size.width
+        // Clamp to [0, duration] in case currentTime races ahead of a segment update on file re-open.
+        let x = CGFloat(min(currentTime, duration) / duration) * size.width
         var path = Path()
         path.move(to:    CGPoint(x: x, y: 0))
         path.addLine(to: CGPoint(x: x, y: size.height))
