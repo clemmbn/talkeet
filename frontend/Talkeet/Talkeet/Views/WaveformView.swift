@@ -29,7 +29,8 @@
  *     (two-finger swipe) is not blocked.
  *   - Zoom state (@State) is internal to the view; the ViewModel does not need it.
  *   - Auto-scroll fires on every currentTime tick (~30 fps) only when zoomed in;
- *     suppressed during user scrub (isDragging = true) to avoid fighting the user.
+ *     suppressed during drag-to-seek (isDragging) and during two-finger scroll
+ *     (isUserScrolling, via .onScrollPhaseChange) to avoid fighting the user.
  */
 
 import SwiftUI
@@ -53,6 +54,9 @@ struct WaveformView: View {
     @State private var gestureBaseZoom: CGFloat = 1.0
     /// True while the user is dragging to seek; suppresses auto-scroll during scrub.
     @State private var isDragging: Bool = false
+    /// True while the scroll view is in an interacting or decelerating phase.
+    /// Suppresses auto-scroll so playback does not fight the user's manual scroll.
+    @State private var isUserScrolling: Bool = false
 
     var body: some View {
         Group {
@@ -126,13 +130,18 @@ struct WaveformView: View {
                                 }
                         )
                     }
-                    // Auto-scroll: when zoomed in and the video is playing (not scrubbing),
-                    // keep the playhead centered in the viewport.
-                    // Note: if the user is two-finger-scrolling simultaneously, the scroll
-                    // may conflict; this is an acceptable tradeoff for the first implementation.
+                    // Auto-scroll: keep playhead centered during playback when zoomed in.
+                    // Suppressed while the user is dragging to seek (isDragging) or while
+                    // the scroll view is responding to a two-finger swipe (isUserScrolling),
+                    // so auto-scroll never fights the user's manual navigation.
                     .onChange(of: currentTime) { _, _ in
-                        guard zoomScale > 1.01, !isDragging else { return }
+                        guard zoomScale > 1.01, !isDragging, !isUserScrolling else { return }
                         proxy.scrollTo("waveform-playhead-anchor", anchor: .center)
+                    }
+                    // Track whether the user is actively scrolling so auto-scroll can yield.
+                    // .interacting = finger on trackpad, .decelerating = momentum scroll.
+                    .onScrollPhaseChange { _, newPhase in
+                        isUserScrolling = (newPhase == .interacting || newPhase == .decelerating)
                     }
                 }
 
