@@ -34,6 +34,43 @@
  */
 
 import SwiftUI
+import AppKit
+
+// MARK: - CmdScrollBridge
+
+/// Application-level NSEvent monitor that fires a handler when Cmd+scroll is detected
+/// over the waveform. Using a class (reference type) avoids Swift 6 struct-capture
+/// issues: `weak self` in the monitor closure safely reaches the live instance.
+///
+/// - Note: NSEvent local monitors receive events only when the app is in the foreground.
+///   The `isHovered` flag narrows handling to events over this specific view.
+private final class CmdScrollBridge: @unchecked Sendable {
+    /// Set to true by `.onHover`; prevents zooming when the cursor is elsewhere.
+    var isHovered = false
+    /// Called on the main thread with `scrollingDeltaY` when Cmd+scroll is detected.
+    var onZoom: ((CGFloat) -> Void)?
+    private var monitor: Any?
+
+    /// Installs the application-level scroll wheel monitor. Call once from `.onAppear`.
+    func start() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, self.isHovered else { return event }
+            guard event.modifierFlags.contains(.command) else { return event }
+            let delta = event.scrollingDeltaY
+            guard delta != 0 else { return event }
+            // Use different sensitivity for precise trackpad vs. discrete mouse wheel.
+            let sensitivity: CGFloat = event.hasPreciseScrollingDeltas ? 0.05 : 0.3
+            let factor = pow(1.1, delta * sensitivity)
+            DispatchQueue.main.async { self.onZoom?(factor) }
+            return nil  // Consume: prevent ScrollView from scrolling on Cmd+scroll.
+        }
+    }
+
+    /// Removes the monitor. Call from `.onDisappear` to prevent stale handlers.
+    func stop() {
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+    }
+}
 
 // MARK: - WaveformView
 
@@ -54,6 +91,10 @@ struct WaveformView: View {
     @State private var gestureBaseZoom: CGFloat = 1.0
     /// True while the user is dragging to seek; suppresses auto-scroll during scrub.
     @State private var isDragging: Bool = false
+    /// True when the cursor is over this view; gates the Cmd+scroll zoom monitor.
+    @State private var isHovered: Bool = false
+    /// Owns the NSEvent monitor for Cmd+scroll zoom. Stable across re-renders (class).
+    @State private var cmdScrollBridge = CmdScrollBridge()
     /// True while the scroll view is in an interacting or decelerating phase.
     /// Suppresses auto-scroll so playback does not fight the user's manual scroll.
     @State private var isUserScrolling: Bool = false
@@ -77,6 +118,24 @@ struct WaveformView: View {
                 gestureBaseZoom = 1.0
             }
         }
+        // Gate Cmd+scroll zoom to events that occur over this view.
+        .onHover { hovering in
+            isHovered = hovering
+            cmdScrollBridge.isHovered = hovering
+        }
+        // Register the Cmd+scroll monitor when the view enters the hierarchy.
+        .onAppear {
+            // Wire the zoom handler; captures @State wrappers by reference so
+            // factor is applied to the live zoomScale on each event.
+            cmdScrollBridge.onZoom = { factor in
+                let newScale = max(1.0, min(50.0, zoomScale * factor))
+                zoomScale = newScale
+                gestureBaseZoom = newScale
+            }
+            cmdScrollBridge.start()
+        }
+        // Remove the monitor when the view leaves the hierarchy to prevent leaks.
+        .onDisappear { cmdScrollBridge.stop() }
     }
 
     // MARK: - Waveform canvas
