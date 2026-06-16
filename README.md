@@ -10,8 +10,8 @@ Everything runs on-device.
 
 Talkeet is split into two independent layers that talk to each other over `localhost`:
 
-- **Backend (Python / FastAPI)** — does the heavy lifting: silence detection, waveform extraction, WhisperX transcription, and export file generation. Runs as a local server on `localhost:8742`, launched and stopped automatically by the macOS app.
-- **Frontend (Swift / SwiftUI)** — the native UI: video playback (AVKit), waveform timeline, segment list, and export controls. Talks to the backend over REST and WebSockets.
+- **Backend (Python / FastAPI):** silence detection, waveform extraction, WhisperX transcription, and export file generation. Runs as a local server on `localhost:8742`, launched and stopped automatically by the macOS app.
+- **Frontend (Swift / SwiftUI):** video playback (AVKit), waveform timeline, segment list, and export controls. Talks to the backend over REST and WebSockets.
 
 ```
 [MP4 file]
