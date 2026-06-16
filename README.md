@@ -1,4 +1,4 @@
-# Talkeet
+# Talkeet (WIP)
 
 A native macOS app for editing talking-head videos. Talkeet detects silences, lets you review and adjust the cuts on a waveform timeline, transcribes speech locally with WhisperX, and exports the edit to the formats used by DaVinci Resolve, Final Cut Pro, and Premiere Pro.
 
